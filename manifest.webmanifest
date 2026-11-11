@@ -1,0 +1,11 @@
+{
+  "name": "CYCLING LINK",
+  "short_name": "CYCLING LINK",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1512",
+  "theme_color": "#10251f",
+  "description": "友達と走るための自転車用GPSメーター"
+}

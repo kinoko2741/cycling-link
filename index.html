@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#10251f">
+  <meta name="description" content="友達と走るための自転車用GPSメーター">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <title>CYCLING LINK</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1512;--panel:#14231e;--panel2:#1c3028;--line:#2b4439;--muted:#a8b9b0;--green:#8be0ae;--white:#f4f8f5}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+    header{padding:18px 18px 12px;display:flex;justify-content:space-between;align-items:center}
+    .brand{font-weight:850;letter-spacing:.08em;font-size:20px}.sub{font-size:11px;color:var(--muted);margin-top:3px}
+    .pill{border:1px solid var(--line);border-radius:99px;padding:6px 10px;color:var(--muted);font-size:11px}
+    main{padding:0 14px 28px;max-width:760px;margin:auto}
+    .speedcard{background:linear-gradient(145deg,#19372b,#14231e);border:1px solid var(--line);border-radius:22px;padding:18px;text-align:center;margin-bottom:12px}
+    .speedlabel{color:var(--muted);font-size:13px}.speed{font-size:76px;font-weight:800;line-height:1.12;letter-spacing:-.05em;font-variant-numeric:tabular-nums}.unit{font-size:15px;color:var(--muted)}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:16px}
+    .stat{background:#10221b;border-radius:14px;padding:11px 7px}.value{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}.label{font-size:11px;color:var(--muted);margin-top:3px}
+    .section{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px;margin:12px 0}
+    .sectionhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700}
+    #map{height:300px;border-radius:13px;background:#263a32;z-index:1}
+    .actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+    button{border:0;border-radius:13px;padding:14px 12px;font-weight:750;font-size:14px;background:var(--green);color:#102019}
+    button.secondary{background:var(--panel2);color:var(--white);border:1px solid var(--line)}
+    button:disabled{opacity:.45}
+    .status{font-size:12px;color:var(--muted);line-height:1.6;margin-top:10px}
+    .notice{font-size:12px;line-height:1.65;color:var(--muted);padding:4px 2px}
+    .bottom{font-size:11px;text-align:center;color:var(--muted);padding:16px}
+    @media(max-width:380px){.speed{font-size:64px}.stats{gap:6px}.value{font-size:17px}}
+  </style>
+</head>
+<body>
+<header>
+  <div><div class="brand">CYCLING LINK</div><div class="sub">FRIENDS CYCLING SYSTEM · TEST BUILD 01</div></div>
+  <div class="pill" id="gpsPill">GPS 未開始</div>
+</header>
+<main>
+  <section class="speedcard">
+    <div class="speedlabel">現在速度</div>
+    <div class="speed" id="speed">--.-</div>
+    <div class="unit">km/h</div>
+    <div class="stats">
+      <div class="stat"><div class="value" id="distance">0.00</div><div class="label">走行距離 km</div></div>
+      <div class="stat"><div class="value" id="average">0.0</div><div class="label">平均速度 km/h</div></div>
+      <div class="stat"><div class="value" id="elapsed">00:00</div><div class="label">走行時間</div></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sectionhead"><span>現在地マップ</span><span class="pill" id="accuracy">精度 --</span></div>
+    <div id="map" aria-label="現在地マップ"></div>
+    <div class="status" id="locationStatus">GPSを開始すると現在地が地図に表示されます。</div>
+  </section>
+
+  <section class="section">
+    <div class="sectionhead">走行コントロール</div>
+    <div class="actions">
+      <button id="startBtn">GPS・計測開始</button>
+      <button class="secondary" id="stopBtn" disabled>計測停止</button>
+      <button class="secondary" id="resetBtn">記録をリセット</button>
+      <button class="secondary" id="centerBtn">現在地へ移動</button>
+    </div>
+    <div class="status" id="recordStatus">計測はまだ開始していません。</div>
+  </section>
+
+  <div class="notice">
+    ※ GPSを使うには位置情報の許可とHTTPS接続が必要です。位置情報はこの試作品では端末内で表示するだけで、サーバーや他の人には送信しません。走行中はスマホを操作せず、安全な場所に停車して操作してください。
+  </div>
+</main>
+<div class="bottom">CYCLING LINK · PRIVATE GROUP PROJECT</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const map = L.map('map').setView([34.3853,132.4553], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  let marker = null, accuracyCircle = null, watchId = null, lastPoint = null;
+  let totalMeters = 0, startedAt = null, timer = null, maxSpeed = 0;
+  let tracking = false, currentLatLng = null;
+
+  const toRad = n => n * Math.PI / 180;
+  function distance(a,b) {
+    const R=6371000, dLat=toRad(b.lat-a.lat), dLon=toRad(b.lng-a.lng);
+    const x=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(x));
+  }
+  function fmtTime(ms) {
+    const s=Math.floor(ms/1000), h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+    return h>0 ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  }
+  function updateStats(speed=null) {
+    $('distance').textContent=(totalMeters/1000).toFixed(2);
+    const elapsed=startedAt ? Date.now()-startedAt : 0;
+    $('elapsed').textContent=fmtTime(elapsed);
+    $('average').textContent=elapsed>5000 ? ((totalMeters/1000)/(elapsed/3600000)).toFixed(1) : '0.0';
+    if(speed!==null) $('speed').textContent=speed.toFixed(1);
+  }
+  function start() {
+    if(!('geolocation' in navigator)){ $('locationStatus').textContent='このブラウザはGPS位置情報に対応していません。'; return; }
+    if(!window.isSecureContext){ $('locationStatus').textContent='GPSにはHTTPS接続が必要です。Webサーバーに公開してから利用してください。'; return; }
+    if(watchId!==null) return;
+    tracking=true; startedAt=Date.now(); lastPoint=null;
+    $('gpsPill').textContent='GPS 計測中'; $('startBtn').disabled=true; $('stopBtn').disabled=false;
+    $('recordStatus').textContent='GPSを取得しています。屋外で数秒お待ちください。';
+    watchId=navigator.geolocation.watchPosition(pos=>{
+      const c=pos.coords, point={lat:c.latitude,lng:c.longitude};
+      currentLatLng=[point.lat,point.lng];
+      const accuracy=c.accuracy || 999;
+      $('accuracy').textContent=`精度 約${Math.round(accuracy)}m`;
+      if(!marker) marker=L.marker(currentLatLng).addTo(map).bindPopup('現在地');
+      else marker.setLatLng(currentLatLng);
+      if(!accuracyCircle) accuracyCircle=L.circle(currentLatLng,{radius:accuracy,color:'#8be0ae',weight:1,fillOpacity:.08}).addTo(map);
+      else {accuracyCircle.setLatLng(currentLatLng);accuracyCircle.setRadius(accuracy);}
+      if(lastPoint && accuracy<60) {
+        const d=distance(lastPoint,point);
+        // Ignore obvious GPS jumps and tiny drift while stationary.
+        if(d>=3 && d<100) totalMeters+=d;
+      }
+      lastPoint=point;
+      let speed=(c.speed!==null && Number.isFinite(c.speed) && c.speed>=0) ? c.speed*3.6 : null;
+      if(speed===null && pos.coords.heading!==null) speed=0;
+      if(accuracy>60) speed=null;
+      if(speed!==null) { maxSpeed=Math.max(maxSpeed,speed); updateStats(speed); }
+      else updateStats(0);
+      $('locationStatus').textContent=`緯度 ${point.lat.toFixed(5)} / 経度 ${point.lng.toFixed(5)} · GPS精度 ${Math.round(accuracy)}m`;
+      $('recordStatus').textContent='計測中です。GPSの精度は天候・建物・端末によって変わります。';
+    },err=>{
+      const messages={1:'位置情報の利用が許可されていません。ブラウザの設定で許可してください。',2:'位置情報を取得できません。屋外で再試行してください。',3:'位置情報の取得がタイムアウトしました。'};
+      $('locationStatus').textContent=messages[err.code] || 'GPSでエラーが発生しました。';
+      stop();
+    },{enableHighAccuracy:true,maximumAge:1000,timeout:20000});
+    timer=setInterval(()=>updateStats(),1000);
+  }
+  function stop() {
+    if(watchId!==null) navigator.geolocation.clearWatch(watchId);
+    watchId=null; tracking=false;
+    if(timer) clearInterval(timer); timer=null;
+    $('gpsPill').textContent='GPS 停止中'; $('startBtn').disabled=false; $('stopBtn').disabled=true;
+    $('recordStatus').textContent=`計測停止 · 最高速度 ${maxSpeed.toFixed(1)} km/h`;
+    updateStats(0);
+  }
+  $('startBtn').addEventListener('click',start);
+  $('stopBtn').addEventListener('click',stop);
+  $('resetBtn').addEventListener('click',()=>{
+    if(tracking) stop();
+    totalMeters=0; startedAt=null; lastPoint=null; maxSpeed=0;
+    updateStats(0); $('recordStatus').textContent='記録をリセットしました。';
+  });
+  $('centerBtn').addEventListener('click',()=>{if(currentLatLng) map.setView(currentLatLng,17); else $('locationStatus').textContent='先にGPSを開始してください。';});
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+  }
+  updateStats(0);
+})();
+</script>
+</body>
+</html>
