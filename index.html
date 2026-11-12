@@ -65,7 +65,20 @@
     .authnote{font-size:11px;color:#a8b9b0;line-height:1.6;margin-top:14px}
     #signOutBtn{font-size:11px;padding:7px 10px;background:#1c3028;color:#f4f8f5;border:1px solid #2b4439}
 
-  </style>
+
+    .intercom-card{background:#14231e;border:1px solid #2b4439;border-radius:18px;padding:16px;margin:14px 0}
+    .intercom-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .intercom-title{font-size:17px;font-weight:800}
+    .intercom-status{font-size:12px;color:#a8b9b0;line-height:1.6;margin:10px 0}
+    .intercom-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+    .intercom-actions button{width:100%}
+    .intercom-main{background:#8be0ae!important;color:#102019!important;font-weight:800}
+    .intercom-main.active{background:#e07b7b!important;color:#201010!important}
+    .intercom-audio{width:100%;margin-top:10px}
+    .intercom-note{font-size:11px;color:#a8b9b0;line-height:1.6;margin-top:10px}
+    .intercom-meter{height:8px;border-radius:20px;background:#263a31;overflow:hidden;margin-top:8px}
+    .intercom-meter>div{height:100%;width:0;background:#8be0ae;transition:width .08s}
+\n  </style>
 </head>
 <body>
 
@@ -125,7 +138,22 @@
     <div class="navhint">※この初期版は地図タップで目的地を指定します。案内はGPS精度や地図データに左右されます。実際の道路標識・交通規則を優先し、安全な場所に停車して操作してください。</div>
   </section>
 
-  <section class="speedcard">
+
+  <section class="intercom-card" id="intercomPanel" aria-label="インカム">
+    <div class="intercom-head">
+      <div class="intercom-title">🎙️ グループインカム</div>
+      <span class="pill" id="intercomPill">未接続</span>
+    </div>
+    <div class="intercom-status" id="intercomStatus" aria-live="polite">マイクを開始すると、声を検知して自動録音します。</div>
+    <div class="intercom-actions">
+      <button type="button" class="intercom-main" id="intercomStartBtn">マイク ON</button>
+      <button type="button" class="secondary" id="intercomMuteBtn" disabled>ミュート</button>
+    </div>
+    <div class="intercom-meter"><div id="intercomMeterFill"></div></div>
+    <div class="intercom-note">声を検知すると録音し、約1秒の無音で録音を区切ります。現在は端末内での録音テスト段階です。仲間への送受信は、次の通信サーバー設定後に有効になります。</div>
+    <audio class="intercom-audio" id="intercomPreview" controls hidden></audio>
+  </section>
+\n  <section class="speedcard">
     <div class="speedlabel">現在速度</div>
     <div class="speed" id="speed">--.-</div>
     <div class="unit">km/h</div>
@@ -580,7 +608,101 @@
 })();
 </script>
 
-<script type="module">
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const startBtn=$('intercomStartBtn'), muteBtn=$('intercomMuteBtn');
+  if(!startBtn || !navigator.mediaDevices?.getUserMedia) {
+    if(startBtn) { startBtn.disabled=true; $('intercomStatus').textContent='このブラウザではマイク機能を利用できません。HTTPS接続か確認してください。'; }
+    return;
+  }
+  let stream=null, audioContext=null, analyser=null, source=null, recorder=null;
+  let chunks=[], raf=0, speaking=false, muted=false, silenceSince=0, lastClipUrl=null;
+  const SILENCE_MS=1000, VOICE_THRESHOLD=0.025;
+  function setStatus(message){$('intercomStatus').textContent=message;}
+  function stopSegment(){
+    if(recorder && recorder.state==='recording') recorder.stop();
+    speaking=false; silenceSince=0;
+  }
+  function beginSegment(){
+    if(!stream || muted || speaking || !window.MediaRecorder) return;
+    let options={};
+    if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) options.mimeType='audio/webm;codecs=opus';
+    else if(MediaRecorder.isTypeSupported('audio/mp4')) options.mimeType='audio/mp4';
+    try { recorder=new MediaRecorder(stream,options); }
+    catch(e){setStatus('この端末の録音形式に対応できません。');return;}
+    chunks=[]; speaking=true;
+    recorder.ondataavailable=e=>{if(e.data && e.data.size) chunks.push(e.data);};
+    recorder.onstop=()=>{
+      if(!chunks.length) return;
+      const blob=new Blob(chunks,{type:recorder.mimeType || 'audio/mp4'});
+      if(lastClipUrl) URL.revokeObjectURL(lastClipUrl);
+      lastClipUrl=URL.createObjectURL(blob);
+      const audio=$('intercomPreview'); audio.src=lastClipUrl; audio.hidden=false;
+      setStatus('音声を録音しました（端末内テスト）。共有送信は通信設定後に有効になります。');
+    };
+    recorder.start();
+    setStatus('声を検知！録音中…');
+  }
+  function monitor(){
+    if(!analyser || !stream) return;
+    const data=new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
+    let sum=0;
+    for(let i=0;i<data.length;i++){const v=(data[i]-128)/128;sum+=v*v;}
+    const level=Math.sqrt(sum/data.length);
+    $('intercomMeterFill').style.width=Math.min(100,level*2400)+'%';
+    if(!muted && level>VOICE_THRESHOLD){
+      silenceSince=0;
+      if(!speaking) beginSegment();
+      else if(recorder && recorder.state==='recording') setStatus('録音中…');
+    } else if(speaking){
+      if(!silenceSince) silenceSince=Date.now();
+      if(Date.now()-silenceSince>=SILENCE_MS) stopSegment();
+    }
+    raf=requestAnimationFrame(monitor);
+  }
+  async function start(){
+    startBtn.disabled=true; setStatus('マイクの使用許可を待っています…');
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+      audioContext=new (window.AudioContext||window.webkitAudioContext)();
+      await audioContext.resume();
+      analyser=audioContext.createAnalyser(); analyser.fftSize=2048;
+      source=audioContext.createMediaStreamSource(stream); source.connect(analyser);
+      $('intercomPill').textContent='マイク待機中';
+      startBtn.textContent='マイク OFF'; startBtn.classList.add('active'); startBtn.disabled=false;
+      muteBtn.disabled=false; muted=false; muteBtn.textContent='ミュート';
+      setStatus('マイク待機中。声を出すと自動録音します。');
+      monitor();
+    }catch(e){
+      startBtn.disabled=false;
+      setStatus(e?.name==='NotAllowedError'?'マイクが許可されませんでした。Safariのサイト設定でマイクを許可してください。':'マイクを開始できませんでした。HTTPS接続と端末の設定を確認してください。');
+    }
+  }
+  function stopAll(){
+    cancelAnimationFrame(raf); stopSegment();
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    if(audioContext) audioContext.close().catch(()=>{});
+    stream=null; audioContext=null; analyser=null; source=null;
+    muted=false; startBtn.textContent='マイク ON'; startBtn.classList.remove('active');
+    $('intercomPill').textContent='停止中'; muteBtn.disabled=true; muteBtn.textContent='ミュート';
+    $('intercomMeterFill').style.width='0%'; setStatus('マイクを停止しました。');
+  }
+  startBtn.addEventListener('click',()=>{if(stream) stopAll(); else start();});
+  muteBtn.addEventListener('click',()=>{
+    if(!stream) return;
+    muted=!muted; stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+    muteBtn.textContent=muted?'ミュート解除':'ミュート';
+    $('intercomPill').textContent=muted?'ミュート中':'マイク待機中';
+    if(muted) stopSegment();
+    setStatus(muted?'マイクをミュートしています。':'マイク待機中。声を出すと自動録音します。');
+  });
+  window.addEventListener('beforeunload',()=>{if(stream) stream.getTracks().forEach(t=>t.stop());});
+})();
+</script>
+\n<script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
