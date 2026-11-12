@@ -618,31 +618,36 @@
     return;
   }
   let stream=null, audioContext=null, analyser=null, source=null, recorder=null;
-  let chunks=[], raf=0, speaking=false, muted=false, silenceSince=0, lastClipUrl=null;
-  const SILENCE_MS=1000, VOICE_THRESHOLD=0.025;
+  let raf=0, speaking=false, muted=false, silenceSince=0, lastClipUrl=null;
+  let noiseFloor=0.008;
+  const SILENCE_MS=1400;
   function setStatus(message){$('intercomStatus').textContent=message;}
   function stopSegment(){
-    if(recorder && recorder.state==='recording') recorder.stop();
+    const active=recorder;
+    recorder=null;
     speaking=false; silenceSince=0;
+    if(active && active.state==='recording') active.stop();
   }
   function beginSegment(){
     if(!stream || muted || speaking || !window.MediaRecorder) return;
     let options={};
     if(MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) options.mimeType='audio/webm;codecs=opus';
     else if(MediaRecorder.isTypeSupported('audio/mp4')) options.mimeType='audio/mp4';
-    try { recorder=new MediaRecorder(stream,options); }
+    let active;
+    try { active=new MediaRecorder(stream,options); }
     catch(e){setStatus('この端末の録音形式に対応できません。');return;}
-    chunks=[]; speaking=true;
-    recorder.ondataavailable=e=>{if(e.data && e.data.size) chunks.push(e.data);};
-    recorder.onstop=()=>{
-      if(!chunks.length) return;
-      const blob=new Blob(chunks,{type:recorder.mimeType || 'audio/mp4'});
+    const segmentChunks=[];
+    speaking=true; recorder=active;
+    active.ondataavailable=e=>{if(e.data && e.data.size) segmentChunks.push(e.data);};
+    active.onstop=()=>{
+      if(!segmentChunks.length) return;
+      const blob=new Blob(segmentChunks,{type:active.mimeType || 'audio/mp4'});
       if(lastClipUrl) URL.revokeObjectURL(lastClipUrl);
       lastClipUrl=URL.createObjectURL(blob);
       const audio=$('intercomPreview'); audio.src=lastClipUrl; audio.hidden=false;
       setStatus('音声を録音しました（端末内テスト）。共有送信は通信設定後に有効になります。');
     };
-    recorder.start();
+    active.start();
     setStatus('声を検知！録音中…');
   }
   function monitor(){
@@ -653,13 +658,17 @@
     for(let i=0;i<data.length;i++){const v=(data[i]-128)/128;sum+=v*v;}
     const level=Math.sqrt(sum/data.length);
     $('intercomMeterFill').style.width=Math.min(100,level*2400)+'%';
-    if(!muted && level>VOICE_THRESHOLD){
+    const threshold=Math.max(0.018,noiseFloor*2.4);
+    if(!muted && level>threshold){
       silenceSince=0;
       if(!speaking) beginSegment();
       else if(recorder && recorder.state==='recording') setStatus('録音中…');
-    } else if(speaking){
-      if(!silenceSince) silenceSince=Date.now();
-      if(Date.now()-silenceSince>=SILENCE_MS) stopSegment();
+    } else {
+      if(!speaking) noiseFloor=noiseFloor*0.98+level*0.02;
+      if(speaking){
+        if(!silenceSince) silenceSince=Date.now();
+        if(Date.now()-silenceSince>=SILENCE_MS) stopSegment();
+      }
     }
     raf=requestAnimationFrame(monitor);
   }
@@ -671,10 +680,11 @@
       await audioContext.resume();
       analyser=audioContext.createAnalyser(); analyser.fftSize=2048;
       source=audioContext.createMediaStreamSource(stream); source.connect(analyser);
+      noiseFloor=0.008;
       $('intercomPill').textContent='マイク待機中';
       startBtn.textContent='マイク OFF'; startBtn.classList.add('active'); startBtn.disabled=false;
       muteBtn.disabled=false; muted=false; muteBtn.textContent='ミュート';
-      setStatus('マイク待機中。声を出すと自動録音します。');
+      setStatus('マイク待機中。声を出すと自動録音し、約1.4秒の無音で自動終了します。');
       monitor();
     }catch(e){
       startBtn.disabled=false;
