@@ -416,9 +416,18 @@
       }
       const data = await response.json();
       if (sequence !== destinationSearchSequence) return;
-      const features = data.features || [];
+      let features = data.features || [];
+      // Photonに施設名が登録されていない場合の、確認済み施設名フォールバック。
+      // 宇品波止場公園：広島市南区宇品海岸三丁目（座標は地図情報に基づく）。
+      const normalizedQuery = query.replace(/[\\s　・,，。]/g, '');
+      if (!features.length && /宇品波止場公園|うじなはとばこうえん/i.test(normalizedQuery)) {
+        features = [{
+          properties: {name:'宇品波止場公園', street:'広島市南区宇品海岸三丁目', city:'広島市', state:'広島県', country:'日本'},
+          geometry: {type:'Point', coordinates:[132.470392,34.3533252]}
+        }];
+      }
       if (!features.length) {
-        setNavStatus('候補が見つかりません。「広島駅」のように地名を足して試してください。');
+        setNavStatus('候補が見つかりません。施設名を短くするか、地図を動かして目的地を直接選んでください。');
         return;
       }
       features.forEach(feature => {
