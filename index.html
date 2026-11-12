@@ -216,8 +216,26 @@
     utterance.lang='ja-JP'; utterance.rate=1;
     window.speechSynthesis.speak(utterance);
   }
+  function finishNavigation() {
+    navigationActive=false;
+    if('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+    if(destinationMarker){map.removeLayer(destinationMarker);destinationMarker=null;}
+    routePoints=[]; maneuvers=[]; routeSummary=null; destination=null;
+    $('navInstruction').textContent='目的地に到着しました';
+    $('navDistance').textContent='到着';
+    $('navPill').textContent='到着';
+    $('navStartBtn').disabled=true;
+    $('navStopBtn').disabled=true;
+    speak('目的地に到着しました');
+    setNavStatus('目的地に到着しました。ルート表示を終了しました。');
+  }
   function updateNavigation(point) {
-    if(!navigationActive || !routePoints.length || !maneuvers.length) return;
+    if(!navigationActive || !routePoints.length) return;
+    if(destination && distance(point,destination)<=45) {
+      finishNavigation();
+      return;
+    }
     const nearest=nearestRouteIndex(point);
     if(nearest.index<0) return;
     if(nearest.distance>100 && (Date.now()-lastOffRouteNotice)>20000) {
@@ -241,18 +259,7 @@
       speak(m.verbal_transition_alert_instruction || m.instruction);
       lastVoiceManeuver=nextIndex;
     }
-    if(remaining<35) {
-      $('navInstruction').textContent='目的地に到着しました';
-      $('navDistance').textContent='到着';
-      speak('目的地に到着しました');
-      navigationActive=false;
-      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
-      routePoints=[]; maneuvers=[]; routeSummary=null;
-      $('navPill').textContent='到着';
-      $('navStartBtn').disabled=true;
-      $('navStopBtn').disabled=true;
-      setNavStatus('目的地に到着しました。ルート表示を終了しました。');
-    }
+    if(remaining<35) finishNavigation();
   }
   async function searchRoute() {
     if(!currentLatLng) {
