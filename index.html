@@ -420,7 +420,7 @@
       // Photonに施設名が登録されていない場合の、確認済み施設名フォールバック。
       // 宇品波止場公園：広島市南区宇品海岸三丁目（座標は地図情報に基づく）。
       const normalizedQuery = query.replace(/[\\s　・,，。]/g, '');
-      if (!features.length && /宇品波止場公園|うじなはとばこうえん/i.test(normalizedQuery)) {
+      if (!features.length && /宇品波止場公園|うじなはとばこうえん|宇品海岸三丁目/i.test(normalizedQuery)) {
         features = [{
           properties: {name:'宇品波止場公園', street:'広島市南区宇品海岸三丁目', city:'広島市', state:'広島県', country:'日本'},
           geometry: {type:'Point', coordinates:[132.470392,34.3533252]}
