@@ -645,7 +645,12 @@
       if(lastClipUrl) URL.revokeObjectURL(lastClipUrl);
       lastClipUrl=URL.createObjectURL(blob);
       const audio=$('intercomPreview'); audio.src=lastClipUrl; audio.hidden=false;
-      setStatus('音声を録音しました（端末内テスト）。共有送信は通信設定後に有効になります。');
+      setStatus('録音終了！自動再生します…');
+      audio.play().then(()=>{
+        setStatus('録音した音声を自動再生中（端末内テスト）。');
+      }).catch(()=>{
+        setStatus('このSafariでは自動再生が制限されました。再生ボタンを押してください。');
+      });
     };
     active.start();
     setStatus('声を検知！録音中…');
