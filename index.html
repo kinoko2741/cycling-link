@@ -31,14 +31,53 @@
     .notice{font-size:12px;line-height:1.65;color:var(--muted);padding:4px 2px}
     .bottom{font-size:11px;text-align:center;color:var(--muted);padding:16px}
     @media(max-width:380px){.speed{font-size:64px}.stats{gap:6px}.value{font-size:17px}}
+
+    [hidden]{display:none!important}
+    .authgate{min-height:100svh;display:grid;place-items:center;padding:22px;background:radial-gradient(ellipse at top,#1a3a2d 0%,#0b1512 65%)}
+    .authbox{width:100%;max-width:420px;background:#14231e;border:1px solid #2b4439;border-radius:22px;padding:22px;box-shadow:0 18px 55px #0006}
+    .authbox h1{font-size:23px;letter-spacing:.06em;margin:0 0 5px}
+    .authsub{font-size:12px;color:#a8b9b0;margin:0 0 20px}
+    .authswitch{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+    .authswitch button{background:#1c3028;color:#f4f8f5;border:1px solid #2b4439}
+    .authswitch button.active{background:#8be0ae;color:#102019}
+    .authfield{display:block;font-size:12px;color:#a8b9b0;margin:13px 0 6px}
+    .authinput{width:100%;padding:13px;border-radius:11px;border:1px solid #2b4439;background:#0b1512;color:#f4f8f5;font:inherit;font-size:16px}
+    .authsubmit{width:100%;margin-top:18px}
+    .authmsg{min-height:36px;margin:12px 0 0;color:#ffd28b;font-size:12px;line-height:1.55}
+    .authnote{font-size:11px;color:#a8b9b0;line-height:1.6;margin-top:14px}
+    #signOutBtn{font-size:11px;padding:7px 10px;background:#1c3028;color:#f4f8f5;border:1px solid #2b4439}
+
   </style>
 </head>
 <body>
-<header>
+
+<div class="authgate" id="authGate">
+  <section class="authbox">
+    <h1>CYCLING LINK</h1>
+    <p class="authsub">FRIENDS CYCLING SYSTEM</p>
+    <div class="authswitch">
+      <button type="button" id="loginMode" class="active">ログイン</button>
+      <button type="button" id="signupMode">新規登録</button>
+    </div>
+    <form id="authForm">
+      <label class="authfield" for="userId">ユーザーID</label>
+      <input class="authinput" id="userId" name="userId" autocomplete="username" maxlength="24" required placeholder="例：cycling_taro">
+      <label class="authfield" for="userPassword">個人パスワード</label>
+      <input class="authinput" id="userPassword" name="password" type="password" autocomplete="current-password" minlength="6" required placeholder="6文字以上">
+      <label class="authfield" for="groupCode">グループ合言葉</label>
+      <input class="authinput" id="groupCode" name="groupCode" type="password" inputmode="numeric" autocomplete="off" required placeholder="合言葉を入力">
+      <button class="authsubmit" id="authSubmit" type="submit">ログイン</button>
+      <p class="authmsg" id="authMessage" role="status"></p>
+    </form>
+    <p class="authnote">ユーザーIDは英数字・「_」・「-」が使えます。個人パスワードは6文字以上です。グループ合言葉は仲間内の確認用で、強固なアクセス制限ではありません。</p>
+  </section>
+</div>
+
+<header id="appHeader" hidden>
   <div><div class="brand">CYCLING LINK</div><div class="sub">FRIENDS CYCLING SYSTEM · TEST BUILD 01</div></div>
-  <div class="pill" id="gpsPill">GPS 未開始</div>
+  <div style="display:flex;align-items:center;gap:8px"><button id="signOutBtn" type="button">ログアウト</button><div class="pill" id="gpsPill">GPS 未開始</div></div>
 </header>
-<main>
+<main id="appMain" hidden>
   <section class="speedcard">
     <div class="speedlabel">現在速度</div>
     <div class="speed" id="speed">--.-</div>
@@ -71,7 +110,7 @@
     ※ GPSを使うには位置情報の許可とHTTPS接続が必要です。位置情報はこの試作品では端末内で表示するだけで、サーバーや他の人には送信しません。走行中はスマホを操作せず、安全な場所に停車して操作してください。
   </div>
 </main>
-<div class="bottom">CYCLING LINK · PRIVATE GROUP PROJECT</div>
+<div class="bottom" id="appBottom" hidden>CYCLING LINK · PRIVATE GROUP PROJECT</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 (() => {
@@ -159,5 +198,99 @@
   updateStats(0);
 })();
 </script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBNrHnDornzudFjAxoiuOmYaPOhrscokYA",
+  authDomain: "cycling-link.firebaseapp.com",
+  projectId: "cycling-link",
+  storageBucket: "cycling-link.firebasestorage.app",
+  messagingSenderId: "504809686015",
+  appId: "1:504809686015:web:89c06334da1cf0e8709dca"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const $ = id => document.getElementById(id);
+let mode = "login";
+
+function setMode(next) {
+  mode = next;
+  $("loginMode").classList.toggle("active", mode === "login");
+  $("signupMode").classList.toggle("active", mode === "signup");
+  $("authSubmit").textContent = mode === "login" ? "ログイン" : "アカウントを作成";
+  $("userPassword").autocomplete = mode === "login" ? "current-password" : "new-password";
+  $("authMessage").textContent = "";
+}
+$("loginMode").addEventListener("click", () => setMode("login"));
+$("signupMode").addEventListener("click", () => setMode("signup"));
+
+function toAuthEmail(userId) {
+  return userId.toLowerCase() + "@cycling-link.invalid";
+}
+function errorText(error) {
+  const code = error?.code || "";
+  const map = {
+    "auth/email-already-in-use": "このユーザーIDは既に使われています。",
+    "auth/invalid-credential": "ユーザーIDまたはパスワードが違います。",
+    "auth/weak-password": "パスワードは6文字以上にしてください。",
+    "auth/too-many-requests": "試行回数が多すぎます。少し時間をおいてください。",
+    "auth/network-request-failed": "通信に失敗しました。接続を確認してください。",
+    "auth/operation-not-allowed": "Firebaseのメール / パスワード認証が有効か確認してください。"
+  };
+  return map[code] || "認証に失敗しました。入力内容と通信状態を確認してください。";
+}
+
+$("authForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const userId = $("userId").value.trim();
+  const password = $("userPassword").value;
+  const groupCode = $("groupCode").value;
+  if (!/^[A-Za-z0-9_-]{3,24}$/.test(userId)) {
+    $("authMessage").textContent = "ユーザーIDは半角英数字・_・-の3〜24文字にしてください。";
+    return;
+  }
+  if (groupCode !== "727") {
+    $("authMessage").textContent = "グループ合言葉が違います。";
+    return;
+  }
+  $("authSubmit").disabled = true;
+  $("authMessage").textContent = "確認しています…";
+  try {
+    const email = toAuthEmail(userId);
+    if (mode === "signup") {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
+  } catch (error) {
+    $("authMessage").textContent = errorText(error);
+  } finally {
+    $("authSubmit").disabled = false;
+  }
+});
+
+onAuthStateChanged(auth, user => {
+  const signedIn = !!user;
+  $("authGate").hidden = signedIn;
+  $("appHeader").hidden = !signedIn;
+  $("appMain").hidden = !signedIn;
+  $("appBottom").hidden = !signedIn;
+  if (signedIn) {
+    const id = (user.email || "").split("@")[0];
+    $("gpsPill").textContent = "ログイン中：" + id;
+  }
+});
+$("signOutBtn").addEventListener("click", async () => {
+  if (confirm("ログアウトしますか？")) await signOut(auth);
+});
+setPersistence(auth, browserLocalPersistence).catch(() => {});
+</script>
+
 </body>
 </html>
