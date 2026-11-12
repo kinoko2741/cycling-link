@@ -43,6 +43,11 @@
     .navhint{font-size:11px;color:#a8b9b0;line-height:1.6;margin-top:9px}
     .navtoggle{display:flex;align-items:center;gap:8px;font-size:12px;color:#d6e3dc;margin-top:10px}
     .navtoggle input{width:18px;height:18px;accent-color:#8be0ae}
+    .destination-search{display:flex;gap:8px;margin:10px 0}
+    .destination-search input{min-width:0;flex:1;padding:12px;border-radius:11px;border:1px solid var(--line);background:#0b1512;color:var(--white);font:inherit;font-size:16px}
+    .search-results{display:grid;gap:6px;margin:8px 0}
+    .search-result{background:#1c3028;color:#f4f8f5;border:1px solid #2b4439;text-align:left;padding:11px;border-radius:11px;font-weight:600}
+
 
 
     [hidden]{display:none!important}
@@ -91,19 +96,13 @@
   <div style="display:flex;align-items:center;gap:8px"><button id="signOutBtn" type="button">ログアウト</button><div class="pill" id="gpsPill">GPS 未開始</div></div>
 </header>
 <main id="appMain" hidden>
-  <section class="speedcard">
-    <div class="speedlabel">現在速度</div>
-    <div class="speed" id="speed">--.-</div>
-    <div class="unit">km/h</div>
-    <div class="stats">
-      <div class="stat"><div class="value" id="distance">0.00</div><div class="label">走行距離 km</div></div>
-      <div class="stat"><div class="value" id="average">0.0</div><div class="label">平均速度 km/h</div></div>
-      <div class="stat"><div class="value" id="elapsed">00:00</div><div class="label">走行時間</div></div>
-    </div>
-  </section>
-
   <section class="navpanel" aria-label="自転車ナビ">
     <div class="sectionhead"><span>自転車ナビ</span><span class="pill" id="navPill">待機中</span></div>
+    <div class="destination-search">
+      <input id="destinationQuery" type="search" maxlength="120" placeholder="場所・住所・施設名を検索" autocomplete="off">
+      <button type="button" id="destinationSearchBtn">検索</button>
+    </div>
+    <div class="search-results" id="destinationResults" aria-live="polite"></div>
     <div class="navgrid">
       <button type="button" class="secondary" id="pickDestinationBtn">目的地を地図で選ぶ</button>
       <button type="button" id="routeSearchBtn">ルート検索</button>
@@ -124,6 +123,17 @@
     <div class="navstatus" id="navStatus">「目的地を地図で選ぶ」を押して、地図上の目的地をタップしてください。</div>
     <div class="navstatus" id="wakeLockStatus">画面点灯維持：未確認</div>
     <div class="navhint">※この初期版は地図タップで目的地を指定します。案内はGPS精度や地図データに左右されます。実際の道路標識・交通規則を優先し、安全な場所に停車して操作してください。</div>
+  </section>
+
+  <section class="speedcard">
+    <div class="speedlabel">現在速度</div>
+    <div class="speed" id="speed">--.-</div>
+    <div class="unit">km/h</div>
+    <div class="stats">
+      <div class="stat"><div class="value" id="distance">0.00</div><div class="label">走行距離 km</div></div>
+      <div class="stat"><div class="value" id="average">0.0</div><div class="label">平均速度 km/h</div></div>
+      <div class="stat"><div class="value" id="elapsed">00:00</div><div class="label">走行時間</div></div>
+    </div>
   </section>
 
   <section class="section">
@@ -374,6 +384,57 @@
     $('navBanner').hidden=true;
     setNavStatus('目的地を設定しました（'+destination.lat.toFixed(5)+', '+destination.lng.toFixed(5)+'）。ルート検索を押してください。');
   });
+  async function searchDestinationByName() {
+    const query = $('destinationQuery').value.trim();
+    if (!query) { setNavStatus('検索したい場所の名前や住所を入力してください。'); return; }
+    const button = $('destinationSearchBtn');
+    button.disabled = true;
+    $('destinationResults').replaceChildren();
+    setNavStatus('目的地を検索しています…');
+    try {
+      const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(query) + '&limit=6&lang=ja';
+      const response = await fetch(url, {headers:{'Accept':'application/json'}});
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const data = await response.json();
+      const features = data.features || [];
+      if (!features.length) { setNavStatus('候補が見つかりませんでした。別の名前や住所で検索してください。'); return; }
+      features.forEach(feature => {
+        const props = feature.properties || {};
+        const coords = feature.geometry?.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+        const name = props.name || props.street || props.city || '名称不明の場所';
+        const detail = [props.street, props.city, props.state, props.country].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join('、');
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'search-result';
+        item.textContent = detail && detail !== name ? name + ' — ' + detail : name;
+        item.addEventListener('click', () => {
+          destination = {lat:coords[1],lng:coords[0]};
+          clearDestinationMarker();
+          destinationMarker = L.marker([destination.lat,destination.lng]).addTo(map).bindPopup('目的地：' + name).openPopup();
+          map.setView([destination.lat,destination.lng],16);
+          choosingDestination = false;
+          $('pickDestinationBtn').textContent = '目的地を地図で選ぶ';
+          $('navPill').textContent = '目的地設定済み';
+          $('navStartBtn').disabled = true;
+          if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+          $('navBanner').hidden = true;
+          $('destinationResults').replaceChildren();
+          setNavStatus('目的地「' + name + '」を設定しました。ルート検索を押してください。');
+        });
+        $('destinationResults').appendChild(item);
+      });
+      if (!$('destinationResults').children.length) setNavStatus('検索結果を読み取れませんでした。');
+      else setNavStatus('候補を選択してください。地図をタップして選ぶ機能も引き続き使えます。');
+    } catch(error) {
+      console.error(error);
+      setNavStatus('場所の検索に失敗しました。通信状態を確認して再試行してください。');
+    } finally {
+      button.disabled = false;
+    }
+  }
+  $('destinationSearchBtn').addEventListener('click',searchDestinationByName);
+  $('destinationQuery').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();searchDestinationByName();}});
   $('routeSearchBtn').addEventListener('click',searchRoute);
   $('wakeLockBtn').addEventListener('click',requestScreenWakeLock);
   $('navStartBtn').addEventListener('click',()=>{
