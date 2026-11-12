@@ -183,6 +183,20 @@
   }
 
   function setNavStatus(message) { $('navStatus').textContent = message; }
+  function clearDestinationMarker() {
+    map.closePopup();
+    map.eachLayer(layer => {
+      if(layer instanceof L.Marker && layer !== marker) {
+        const popup=layer.getPopup?.();
+        const content=popup?.getContent?.();
+        if(content === '目的地' || layer === destinationMarker) map.removeLayer(layer);
+      }
+    });
+    if(destinationMarker) {
+      if(map.hasLayer(destinationMarker)) map.removeLayer(destinationMarker);
+      destinationMarker=null;
+    }
+  }
   function decodePolyline6(encoded) {
     let index=0, lat=0, lng=0, points=[];
     while(index<encoded.length) {
@@ -220,7 +234,7 @@
     navigationActive=false;
     if('speechSynthesis' in window) window.speechSynthesis.cancel();
     if(routeLine){map.removeLayer(routeLine);routeLine=null;}
-    if(destinationMarker){map.removeLayer(destinationMarker);destinationMarker=null;}
+    clearDestinationMarker();
     routePoints=[]; maneuvers=[]; routeSummary=null; destination=null;
     $('navInstruction').textContent='目的地に到着しました';
     $('navDistance').textContent='到着';
@@ -316,7 +330,7 @@
   map.on('click',event=>{
     if(!choosingDestination) return;
     destination={lat:event.latlng.lat,lng:event.latlng.lng};
-    if(destinationMarker) map.removeLayer(destinationMarker);
+    clearDestinationMarker();
     destinationMarker=L.marker(event.latlng).addTo(map).bindPopup('目的地').openPopup();
     choosingDestination=false;
     $('pickDestinationBtn').textContent='目的地を地図で選ぶ';
@@ -337,6 +351,8 @@
   });
   $('navStopBtn').addEventListener('click',()=>{
     navigationActive=false;
+    clearDestinationMarker();
+    destination=null;
     if('speechSynthesis' in window) window.speechSynthesis.cancel();
     $('navPill').textContent='一時停止';
     $('navStartBtn').disabled=false; $('navStopBtn').disabled=true;
