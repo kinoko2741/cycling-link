@@ -109,6 +109,7 @@
       <button type="button" id="routeSearchBtn">ルート検索</button>
       <button type="button" class="secondary" id="navStartBtn" disabled>ナビ開始</button>
       <button type="button" class="secondary" id="navStopBtn" disabled>ナビ終了</button>
+      <button type="button" class="secondary" id="wakeLockBtn">画面点灯を維持</button>
     </div>
     <div class="navbanner" id="navBanner" hidden>
       <div class="small" id="navDistance">次の案内まで -- m</div>
@@ -121,6 +122,7 @@
     </div>
     <label class="navtoggle"><input type="checkbox" id="voiceGuide" checked> 音声案内を使う</label>
     <div class="navstatus" id="navStatus">「目的地を地図で選ぶ」を押して、地図上の目的地をタップしてください。</div>
+    <div class="navstatus" id="wakeLockStatus">画面点灯維持：未確認</div>
     <div class="navhint">※この初期版は地図タップで目的地を指定します。案内はGPS精度や地図データに左右されます。実際の道路標識・交通規則を優先し、安全な場所に停車して操作してください。</div>
   </section>
 
@@ -172,10 +174,15 @@
     try {
       if(screenWakeLock && !screenWakeLock.released) return;
       screenWakeLock = await navigator.wakeLock.request('screen');
-      screenWakeLock.addEventListener('release', () => { screenWakeLock = null; });
+      $('wakeLockStatus').textContent = '画面点灯維持：有効';
+      screenWakeLock.addEventListener('release', () => {
+        screenWakeLock = null;
+        $('wakeLockStatus').textContent = '画面点灯維持：解除されました';
+      });
     } catch(error) {
       console.warn('Screen Wake Lock could not be acquired:', error);
-      setNavStatus('画面点灯を維持できませんでした。ブラウザを前面にしてお試しください。');
+      $('wakeLockStatus').textContent = '画面点灯維持：取得失敗（' + (error?.name || '不明') + '）';
+      setNavStatus('画面点灯維持に失敗しました。画面点灯ボタンをもう一度押してください。');
     }
   }
   async function releaseScreenWakeLock() {
@@ -368,6 +375,7 @@
     setNavStatus('目的地を設定しました（'+destination.lat.toFixed(5)+', '+destination.lng.toFixed(5)+'）。ルート検索を押してください。');
   });
   $('routeSearchBtn').addEventListener('click',searchRoute);
+  $('wakeLockBtn').addEventListener('click',requestScreenWakeLock);
   $('navStartBtn').addEventListener('click',()=>{
     if(!routePoints.length){setNavStatus('先にルート検索をしてください。');return;}
     navigationActive=true; currentManeuverIndex=-1; lastVoiceManeuver=-1;
