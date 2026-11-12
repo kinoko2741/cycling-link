@@ -403,19 +403,17 @@
     $('destinationResults').replaceChildren();
     setNavStatus('「' + query + '」の候補を探しています…');
     try {
-      const params = new URLSearchParams({q:query,limit:'6',lang:'default'});
-      // GPS位置が分かる場合は、近くの候補を優先してもらう。
-      if (currentLatLng) {
-        params.set('lat', String(currentLatLng[0]));
-        params.set('lon', String(currentLatLng[1]));
-        params.set('zoom', '13');
-      }
+      // まず必須の検索語だけを送り、任意パラメータによるHTTP 400を避ける。
+      const params = new URLSearchParams({q:query,limit:'6'});
       const response = await fetch('https://photon.komoot.io/api/?' + params.toString(), {
         headers:{'Accept':'application/json'},
         signal:controller.signal,
         cache:'no-store'
       });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
+      if (!response.ok) {
+        const errorBody = await response.text().catch(()=>'');
+        throw new Error('HTTP ' + response.status + (errorBody ? '：' + errorBody.slice(0,220) : ''));
+      }
       const data = await response.json();
       if (sequence !== destinationSearchSequence) return;
       const features = data.features || [];
