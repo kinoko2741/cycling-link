@@ -273,7 +273,8 @@
       speak(m.verbal_transition_alert_instruction || m.instruction);
       lastVoiceManeuver=nextIndex;
     }
-    if(remaining<35) finishNavigation();
+    // ルート上の最後の点にGPSが一時的に吸い寄せられても、到着扱いにしない。
+    // 到着判定は上の目的地との実距離だけで行う。
   }
   async function searchRoute() {
     if(!currentLatLng) {
@@ -373,6 +374,13 @@
       $('accuracy').textContent=`精度 約${Math.round(accuracy)}m`;
       if(!marker) marker=L.marker(currentLatLng).addTo(map).bindPopup('現在地');
       else marker.setLatLng(currentLatLng);
+      // ナビ中は現在地を地図の中心付近に保つ。ズーム倍率とルート線は維持する。
+      if(navigationActive) {
+        const mapCenter=map.getCenter();
+        if(metersBetween([mapCenter.lat,mapCenter.lng],[point.lat,point.lng])>20) {
+          map.panTo(currentLatLng,{animate:true,duration:0.25});
+        }
+      }
       if(!accuracyCircle) accuracyCircle=L.circle(currentLatLng,{radius:accuracy,color:'#8be0ae',weight:1,fillOpacity:.08}).addTo(map);
       else {accuracyCircle.setLatLng(currentLatLng);accuracyCircle.setRadius(accuracy);}
       if(lastPoint && accuracy<60) {
