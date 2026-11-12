@@ -403,7 +403,7 @@
     $('destinationResults').replaceChildren();
     setNavStatus('「' + query + '」の候補を探しています…');
     try {
-      const params = new URLSearchParams({q:query,limit:'6',lang:'ja'});
+      const params = new URLSearchParams({q:query,limit:'6',lang:'default'});
       // GPS位置が分かる場合は、近くの候補を優先してもらう。
       if (currentLatLng) {
         params.set('lat', String(currentLatLng[0]));
