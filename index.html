@@ -246,9 +246,12 @@
       $('navDistance').textContent='到着';
       speak('目的地に到着しました');
       navigationActive=false;
+      if(routeLine){map.removeLayer(routeLine);routeLine=null;}
+      routePoints=[]; maneuvers=[]; routeSummary=null;
       $('navPill').textContent='到着';
-      $('navStartBtn').disabled=false;
+      $('navStartBtn').disabled=true;
       $('navStopBtn').disabled=true;
+      setNavStatus('目的地に到着しました。ルート表示を終了しました。');
     }
   }
   async function searchRoute() {
