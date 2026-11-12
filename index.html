@@ -99,7 +99,7 @@
   <section class="navpanel" aria-label="自転車ナビ">
     <div class="sectionhead"><span>自転車ナビ</span><span class="pill" id="navPill">待機中</span></div>
     <div class="destination-search">
-      <input id="destinationQuery" type="search" maxlength="120" placeholder="場所・住所・施設名を検索" autocomplete="off">
+      <input id="destinationQuery" type="search" maxlength="120" placeholder="場所を入力すると候補が出ます" autocomplete="off">
       <button type="button" id="destinationSearchBtn">検索</button>
     </div>
     <div class="search-results" id="destinationResults" aria-live="polite"></div>
@@ -384,30 +384,61 @@
     $('navBanner').hidden=true;
     setNavStatus('目的地を設定しました（'+destination.lat.toFixed(5)+', '+destination.lng.toFixed(5)+'）。ルート検索を押してください。');
   });
-  async function searchDestinationByName() {
-    const query = $('destinationQuery').value.trim();
-    if (!query) { setNavStatus('検索したい場所の名前や住所を入力してください。'); return; }
+  let destinationSearchTimer = null;
+  let destinationSearchController = null;
+  let destinationSearchSequence = 0;
+  async function searchDestinationByName(queryOverride) {
+    const query = (queryOverride ?? $('destinationQuery').value).trim();
+    if (!query || query.length < 2) {
+      $('destinationResults').replaceChildren();
+      if (query.length === 1) setNavStatus('もう1文字入力すると候補が表示されます。');
+      return;
+    }
     const button = $('destinationSearchBtn');
     button.disabled = true;
+    if (destinationSearchController) destinationSearchController.abort();
+    destinationSearchController = new AbortController();
+    const controller = destinationSearchController;
+    const sequence = ++destinationSearchSequence;
     $('destinationResults').replaceChildren();
-    setNavStatus('目的地を検索しています…');
+    setNavStatus('「' + query + '」の候補を探しています…');
     try {
-      const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(query) + '&limit=6&lang=ja';
-      const response = await fetch(url, {headers:{'Accept':'application/json'}});
+      const params = new URLSearchParams({q:query,limit:'6',lang:'ja',countrycode:'jp'});
+      // GPS位置が分かる場合は、近くの候補を優先してもらう。
+      if (currentLatLng) {
+        params.set('lat', String(currentLatLng[0]));
+        params.set('lon', String(currentLatLng[1]));
+        params.set('zoom', '13');
+      }
+      const response = await fetch('https://photon.komoot.io/api/?' + params.toString(), {
+        headers:{'Accept':'application/json'},
+        signal:controller.signal,
+        cache:'no-store'
+      });
       if (!response.ok) throw new Error('HTTP ' + response.status);
       const data = await response.json();
+      if (sequence !== destinationSearchSequence) return;
       const features = data.features || [];
-      if (!features.length) { setNavStatus('候補が見つかりませんでした。別の名前や住所で検索してください。'); return; }
+      if (!features.length) {
+        setNavStatus('候補が見つかりません。「広島駅」のように地名を足して試してください。');
+        return;
+      }
       features.forEach(feature => {
         const props = feature.properties || {};
         const coords = feature.geometry?.coordinates;
-        if (!Array.isArray(coords) || coords.length < 2) return;
+        if (!Array.isArray(coords) || coords.length < 2 || !Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
         const name = props.name || props.street || props.city || '名称不明の場所';
-        const detail = [props.street, props.city, props.state, props.country].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join('、');
+        const detail = [props.street, props.district, props.city, props.state, props.country]
+          .filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).filter(v=>v!==name).join('・');
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'search-result';
-        item.textContent = detail && detail !== name ? name + ' — ' + detail : name;
+        const title = document.createElement('strong');
+        title.textContent = 'ここ？ ' + name;
+        const sub = document.createElement('span');
+        sub.style.cssText = 'display:block;font-size:11px;color:#a8b9b0;font-weight:400;margin-top:4px';
+        sub.textContent = detail || '地図上の位置を確認';
+        item.append(title,sub);
         item.addEventListener('click', () => {
           destination = {lat:coords[1],lng:coords[0]};
           clearDestinationMarker();
@@ -420,21 +451,42 @@
           if(routeLine){map.removeLayer(routeLine);routeLine=null;}
           $('navBanner').hidden = true;
           $('destinationResults').replaceChildren();
-          setNavStatus('目的地「' + name + '」を設定しました。ルート検索を押してください。');
+          $('destinationQuery').value = name;
+          setNavStatus('目的地「' + name + '」を設定しました。場所が合っているか地図で確認してから、ルート検索を押してください。');
         });
         $('destinationResults').appendChild(item);
       });
-      if (!$('destinationResults').children.length) setNavStatus('検索結果を読み取れませんでした。');
-      else setNavStatus('候補を選択してください。地図をタップして選ぶ機能も引き続き使えます。');
+      if (!$('destinationResults').children.length) setNavStatus('検索結果を読み取れませんでした。別の言葉で試してください。');
+      else setNavStatus('候補が出ました。「ここ？」をタップして目的地に設定できます。入力を続けると候補も更新されます。');
     } catch(error) {
-      console.error(error);
-      setNavStatus('場所の検索に失敗しました。通信状態を確認して再試行してください。');
+      if (error.name === 'AbortError') return;
+      console.error('Destination search failed:', error);
+      setNavStatus('場所の検索に失敗しました（' + (error.message || '通信エラー') + '）。通信状態を確認して再試行してください。');
     } finally {
-      button.disabled = false;
+      if (sequence === destinationSearchSequence) button.disabled = false;
     }
   }
-  $('destinationSearchBtn').addEventListener('click',searchDestinationByName);
-  $('destinationQuery').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();searchDestinationByName();}});
+  $('destinationSearchBtn').addEventListener('click',()=>searchDestinationByName());
+  $('destinationQuery').addEventListener('input',()=>{
+    if (destinationSearchTimer) clearTimeout(destinationSearchTimer);
+    if (destinationSearchController) destinationSearchController.abort();
+    const query = $('destinationQuery').value.trim();
+    if (query.length < 2) {
+      $('destinationResults').replaceChildren();
+      if (query.length === 1) setNavStatus('もう1文字入力すると候補が表示されます。');
+      return;
+    }
+    $('destinationResults').replaceChildren();
+    setNavStatus('入力中…候補を検索します。');
+    destinationSearchTimer = setTimeout(()=>searchDestinationByName(query),650);
+  });
+  $('destinationQuery').addEventListener('keydown',event=>{
+    if(event.key==='Enter'){
+      event.preventDefault();
+      if(destinationSearchTimer) clearTimeout(destinationSearchTimer);
+      searchDestinationByName();
+    }
+  });
   $('routeSearchBtn').addEventListener('click',searchRoute);
   $('wakeLockBtn').addEventListener('click',requestScreenWakeLock);
   $('navStartBtn').addEventListener('click',()=>{
